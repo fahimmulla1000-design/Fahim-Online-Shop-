@@ -1,0 +1,496 @@
+package com.example.ui.screens
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.example.data.model.CartItem
+import com.example.ui.theme.*
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CartCheckoutScreen(
+    isEnglish: Boolean,
+    cartItems: List<CartItem>,
+    subtotal: Double,
+    discount: Double,
+    appliedCoupon: String?,
+    initialName: String = "",
+    initialPhone: String = "",
+    initialAddress: String = "",
+    initialDistrict: String = "ঢাকা (Dhaka)",
+    onUpdateQuantity: (Long, Int) -> Unit,
+    onRemoveItem: (Long) -> Unit,
+    onApplyCoupon: (String) -> Unit,
+    onRemoveCoupon: () -> Unit,
+    onPlaceOrder: (
+        name: String,
+        phone: String,
+        address: String,
+        district: String,
+        paymentMethod: String,
+        paymentAccount: String,
+        transactionId: String,
+        notes: String
+    ) -> Unit,
+    onNavigateBack: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // Delivery form states - completely clean
+    var customerName by remember(initialName) { mutableStateOf(initialName) }
+    var customerPhone by remember(initialPhone) { mutableStateOf(initialPhone) }
+    var customerAddress by remember(initialAddress) { mutableStateOf(initialAddress) }
+    var selectedDistrict by remember(initialDistrict) {
+        mutableStateOf(if (initialDistrict.isNotBlank()) initialDistrict else "ঢাকা (Dhaka)")
+    }
+    var notes by remember { mutableStateOf("") }
+    var couponInput by remember { mutableStateOf("") }
+
+    // Active payment methods: "bKash" or "COD"
+    var selectedPaymentMethod by remember { mutableStateOf("bKash") }
+
+    // Clean payment inputs
+    var bkashPhone by remember { mutableStateOf("") }
+    var bkashTrxId by remember { mutableStateOf("") }
+
+    var formError by remember { mutableStateOf<String?>(null) }
+    var bKashCopied by remember { mutableStateOf(false) }
+
+    val districts = listOf(
+        "ঢাকা (Dhaka)",
+        "চট্টগ্রাম (Chittagong)",
+        "সিলেট (Sylhet)",
+        "রাজশাহী (Rajshahi)",
+        "খুলনা (Khulna)",
+        "বরিশাল (Barishal)",
+        "রংপুর (Rangpur)",
+        "ময়মনসিংহ (Mymensingh)"
+    )
+
+    val deliveryFee = if (selectedDistrict.contains("ঢাকা", ignoreCase = true) || selectedDistrict.contains("Dhaka", ignoreCase = true)) 60.0 else 120.0
+    val grandTotal = (subtotal + deliveryFee - discount).coerceAtLeast(0.0)
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = if (isEnglish) "Shopping Cart & Checkout" else "শপিং কার্ট ও চেকআউট",
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    titleContentColor = Color.White,
+                    navigationIconContentColor = Color.White
+                )
+            )
+        }
+    ) { paddingValues ->
+        if (cartItems.isEmpty()) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(32.dp)
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(96.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.ShoppingCart,
+                        contentDescription = "Empty",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(48.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = if (isEnglish) "Your cart is empty!" else "আপনার শপিং কার্ট খালি!",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(
+                    onClick = onNavigateBack,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(if (isEnglish) "Explore Products" else "পণ্য দেখতে যান", fontWeight = FontWeight.Bold)
+                }
+            }
+        } else {
+            Column(
+                modifier = modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .background(MaterialTheme.colorScheme.background)
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp)
+            ) {
+                Text(
+                    text = if (isEnglish) "Items in Cart (${cartItems.size})" else "কার্টের পণ্যসমূহ (${cartItems.size} টি)",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                cartItems.forEach { item ->
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(60.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                            ) {
+                                AsyncImage(
+                                    model = item.productImageUrl,
+                                    contentDescription = item.productTitle,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = item.productTitle,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.sp,
+                                    maxLines = 1
+                                )
+                                Text(
+                                    text = "৳${String.format("%,.0f", item.productPrice)}",
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontSize = 14.sp
+                                )
+                            }
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = { onUpdateQuantity(item.id, item.quantity - 1) },
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (item.quantity == 1) Icons.Filled.Delete else Icons.Filled.Remove,
+                                        contentDescription = "Decrease",
+                                        tint = if (item.quantity == 1) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                Text(
+                                    text = item.quantity.toString(),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    modifier = Modifier.padding(horizontal = 6.dp)
+                                )
+                                IconButton(
+                                    onClick = { onUpdateQuantity(item.id, item.quantity + 1) },
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(Icons.Filled.Add, contentDescription = "Increase", modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Delivery Form
+                Text(
+                    text = if (isEnglish) "Delivery Information" else "ডেলিভারি ঠিকানা ও তথ্য",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedTextField(
+                            value = customerName,
+                            onValueChange = { customerName = it },
+                            label = { Text(if (isEnglish) "Customer Name *" else "আপনার নাম *") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        OutlinedTextField(
+                            value = customerPhone,
+                            onValueChange = { customerPhone = it },
+                            label = { Text(if (isEnglish) "Mobile Number *" else "মোবাইল নম্বর *") },
+                            placeholder = { Text("01XXXXXXXXX") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        var expandedDistrict by remember { mutableStateOf(false) }
+                        Box {
+                            OutlinedButton(
+                                onClick = { expandedDistrict = true },
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(selectedDistrict, color = MaterialTheme.colorScheme.onSurface)
+                                    Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+                                }
+                            }
+                            DropdownMenu(
+                                expanded = expandedDistrict,
+                                onDismissRequest = { expandedDistrict = false }
+                            ) {
+                                districts.forEach { dist ->
+                                    DropdownMenuItem(
+                                        text = { Text(dist) },
+                                        onClick = {
+                                            selectedDistrict = dist
+                                            expandedDistrict = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = customerAddress,
+                            onValueChange = { customerAddress = it },
+                            label = { Text(if (isEnglish) "Detailed Address *" else "সম্পূর্ণ ঠিকানা (বাসা/রোড/এলাকা) *") },
+                            minLines = 2,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Payment Section
+                Text(
+                    text = if (isEnglish) "Select Payment Method *" else "মূল্য পরিশোধের মাধ্যম বেছে নিন *",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                val clipboardManager = LocalClipboardManager.current
+
+                // 1. bKash (সক্রিয়)
+                PaymentOptionCard(
+                    title = "বিকাশ (bKash) • সক্রিয়",
+                    subtitle = "মার্চেন্ট পেমেন্ট / সেন্ড মানি (01677912135)",
+                    brandColor = BKashPink,
+                    icon = Icons.Filled.AccountBalanceWallet,
+                    isSelected = selectedPaymentMethod == "bKash",
+                    isComingSoon = false,
+                    onSelect = {
+                        selectedPaymentMethod = "bKash"
+                        formError = null
+                    }
+                )
+
+                AnimatedVisibility(visible = selectedPaymentMethod == "bKash") {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = BKashPink.copy(alpha = 0.08f)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, BKashPink.copy(alpha = 0.4f)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Text("বিকাশ নম্বর (Send Money / Payment):", fontSize = 11.sp, color = Color.DarkGray)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("01677912135", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = BKashPink)
+                                OutlinedButton(
+                                    onClick = {
+                                        clipboardManager.setText(AnnotatedString("01677912135"))
+                                        bKashCopied = true
+                                    },
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(if (bKashCopied) Icons.Filled.Check else Icons.Filled.ContentCopy, contentDescription = "Copy", modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(if (bKashCopied) "কপি হয়েছে" else "কপি", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = bkashPhone,
+                                onValueChange = { bkashPhone = it; formError = null },
+                                label = { Text("আপনার বিকাশ নম্বর *") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = bkashTrxId,
+                                onValueChange = { bkashTrxId = it; formError = null },
+                                label = { Text("Transaction ID (TrxID) *") },
+                                placeholder = { Text("যেমন: 9XF78L0P") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // 2. COD (সক্রিয়)
+                PaymentOptionCard(
+                    title = "ক্যাশ অন ডেলিভারি (Cash on Delivery) • সক্রিয়",
+                    subtitle = "পণ্য হাতে পেয়ে টাকা দিন (১০০% নিরাপদ ডেলিভারি)",
+                    brandColor = CashGreen,
+                    icon = Icons.Filled.LocalShipping,
+                    isSelected = selectedPaymentMethod == "COD",
+                    isComingSoon = false,
+                    onSelect = {
+                        selectedPaymentMethod = "COD"
+                        formError = null
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // 3. Nagad (COMING SOON)
+                PaymentOptionCard(
+                    title = "নগদ (Nagad)",
+                    subtitle = "অনলাইন গেটওয়ে দ্রুত যুক্ত হচ্ছে • সাময়িক বন্ধ",
+                    brandColor = NagadOrange,
+                    icon = Icons.Filled.Payments,
+                    isSelected = false,
+                    isComingSoon = true,
+                    onSelect = {
+                        formError = "নগদ পেমেন্ট বর্তমানে চালু হয়নি (Coming Soon)। বিকাশ অথবা ক্যাশ অন ডেলিভারি বেছে নিন।"
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // 4. Visa (COMING SOON)
+                PaymentOptionCard(
+                    title = "ভিসা / মাস্টারকার্ড (Visa Card)",
+                    subtitle = "কার্ড পেমেন্ট গেটওয়ে দ্রুত যুক্ত হচ্ছে • সাময়িক বন্ধ",
+                    brandColor = VisaBlue,
+                    icon = Icons.Filled.CreditCard,
+                    isSelected = false,
+                    isComingSoon = true,
+                    onSelect = {
+                        formError = "কার্ড পেমেন্ট বর্তমানে চালু হয়নি (Coming Soon)। বিকাশ অথবা ক্যাশ অন ডেলিভারি বেছে নিন।"
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Place Order Button
+                Button(
+                    onClick = {
+                        if (customerName.isBlank()) {
+                            formError = if (isEnglish) "Please enter your name" else "দয়া করে আপনার নাম লিখুন"
+                        } else if (customerPhone.isBlank() || customerPhone.length < 10) {
+                            formError = if (isEnglish) "Please enter valid phone number" else "সঠিক মোবাইল নম্বর লিখুন (১০-১১ ডিজিট)"
+                        } else if (customerAddress.isBlank()) {
+                            formError = if (isEnglish) "Please enter delivery address" else "ডেলিভারির পূর্ণ ঠিকানা লিখুন"
+                        } else if (selectedPaymentMethod == "bKash" && bkashPhone.isBlank()) {
+                            formError = "দয়া করে আপনার বিকাশ নম্বরটি লিখুন"
+                        } else if (selectedPaymentMethod == "bKash" && bkashTrxId.isBlank()) {
+                            formError = "বিকাশ TrxID লিখুন"
+                        } else {
+                            formError = null
+                            val (methodLabel, account, trx) = when (selectedPaymentMethod) {
+                                "bKash" -> Triple("বিকাশ (bKash)", bkashPhone, bkashTrxId.trim())
+                                else -> Triple("ক্যাশ অন ডেলিভারি (COD)", "ক্যাশ অন ডেলিভারি", "COD-${System.currentTimeMillis() % 100000}")
+                            }
+
+                            onPlaceOrder(
+                                customerName.trim(),
+                                customerPhone.trim(),
+                                customerAddress.trim(),
+                                selectedDistrict,
+                                methodLabel,
+                                account,
+                                trx,
+                                notes.trim()
+                            )
+                        }
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (selectedPaymentMethod == "bKash") BKashPink else MaterialTheme.colorScheme.primary
+                    ),
+                    modifier = Modifier.fillMaxWidth().height(54.dp)
+                ) {
+                    Icon(Icons.Filled.CheckCircle, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "অর্ডার নিশ্চিত করুন (৳${String.format("%,.0f", grandTotal)})",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                }
+            }
+        }
+    }
+}
